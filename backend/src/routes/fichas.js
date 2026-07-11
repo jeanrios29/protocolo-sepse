@@ -5,6 +5,8 @@ import { requireAuth } from "../auth.js";
 const router = Router();
 router.use(requireAuth);
 
+const EXPORT_MAX_ROWS = 10000;
+
 router.get("/criterios", async (req, res, next) => {
   try {
     const { rows } = await pool.query("SELECT id, label, ordem, categoria FROM sirs_criterios_catalogo ORDER BY ordem");
@@ -181,10 +183,14 @@ router.get("/export/data", async (req, res, next) => {
                  FROM atendimento_antibioticos aa JOIN antibioticos_catalogo a ON a.id = aa.antibiotico_id
                  WHERE aa.atendimento_id = r.id) AS antibioticos
        FROM vw_atendimentos_resumo r ${where}
-       ORDER BY r.data_atendimento DESC, r.hora_atendimento DESC`,
+       ORDER BY r.data_atendimento DESC, r.hora_atendimento DESC
+       LIMIT ${EXPORT_MAX_ROWS + 1}`,
       params
     );
-    res.json(rows);
+    // Teto de segurança: com anos de dados a exportação sem limite pode
+    // sobrecarregar o servidor. Sinaliza truncamento para o cliente avisar.
+    const truncated = rows.length > EXPORT_MAX_ROWS;
+    res.json({ rows: truncated ? rows.slice(0, EXPORT_MAX_ROWS) : rows, truncated, max: EXPORT_MAX_ROWS });
   } catch (err) {
     next(err);
   }

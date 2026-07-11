@@ -1204,7 +1204,11 @@ function HistoricoTab({ refreshKey, onNovaFicha }) {
   async function exportExcel() {
     setExporting(true);
     try {
-      const rows = await api.exportFichas(filters);
+      const res = await api.exportFichas(filters);
+      const rows = res.rows || [];
+      if (res.truncated) {
+        alert(`A exportação foi limitada às ${res.max.toLocaleString("pt-BR")} fichas mais recentes. Refine os filtros (ex.: período) para exportar o restante.`);
+      }
       const sheetRows = rows.map((f) => ({
         Data: f.data_atendimento?.split("-").reverse().join("/"),
         Hora: f.hora_atendimento?.slice(0, 5),
@@ -1754,6 +1758,7 @@ function AdminTab() {
     e.preventDefault();
     setError("");
     if (!form.nome.trim() || !form.crm.trim() || !form.senha.trim()) return setError("Preencha nome, CRM e senha.");
+    if (form.senha.trim().length < 6) return setError("A senha provisória precisa ter ao menos 6 caracteres.");
     try {
       await api.createUser(form);
       setForm({ nome: "", crm: "", email: "", senha: "" });
@@ -1764,13 +1769,19 @@ function AdminTab() {
   }
 
   async function toggleActive(crm) {
-    await api.toggleUserActive(crm);
-    reload();
+    setError("");
+    try {
+      await api.toggleUserActive(crm);
+      reload();
+    } catch (err) {
+      setError(err.message);
+    }
   }
 
+  // Repassa erro para o modal decidir (não fecha em caso de falha).
   async function resetPassword(crm, novaSenha) {
     await api.resetUserPassword(crm, novaSenha);
-    setEditing(null);
+    reload();
   }
 
   return (
@@ -1838,16 +1849,47 @@ function AdminTab() {
 
 function ResetPasswordModal({ crm, onClose, onConfirm }) {
   const [pw, setPw] = useState("");
+  const [pw2, setPw2] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+
+  async function handleSave() {
+    setError("");
+    if (pw.trim().length < 6) return setError("A senha precisa ter ao menos 6 caracteres.");
+    if (pw !== pw2) return setError("As senhas não coincidem.");
+    setBusy(true);
+    try {
+      await onConfirm(pw.trim());
+      setDone(true);
+      setTimeout(onClose, 1100);
+    } catch (err) {
+      setError(err.message);
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="modal-overlay" style={{ position: "fixed", inset: 0, background: "rgba(15,42,51,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, zIndex: 50 }} onClick={onClose}>
       <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, maxWidth: 360, width: "100%", padding: 22 }}>
         <h3 style={{ marginTop: 0, color: C.ink, fontSize: 15 }}>Redefinir senha — CRM {crm}</h3>
-        <label style={{ ...labelStyle, marginTop: 4 }}>Nova senha</label>
-        <input value={pw} onChange={(e) => setPw(e.target.value)} style={inputStyle} />
-        <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
-          <button onClick={onClose} className="btn-secondary" style={{ ...secondaryBtn, flex: 1, justifyContent: "center" }}>Cancelar</button>
-          <button onClick={() => pw.trim() && onConfirm(pw.trim())} className="btn-primary" style={{ ...primaryBtn, flex: 1, marginTop: 0 }}>Salvar</button>
-        </div>
+        {done ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, color: C.green, background: C.greenBg, borderRadius: 9, padding: "10px 12px", fontSize: 13, fontWeight: 600, marginTop: 10 }}>
+            <CheckCircle2 size={16} /> Senha redefinida com sucesso.
+          </div>
+        ) : (
+          <>
+            <label style={{ ...labelStyle, marginTop: 4 }}>Nova senha</label>
+            <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} style={inputStyle} placeholder="Mínimo 6 caracteres" autoFocus />
+            <label style={labelStyle}>Confirmar nova senha</label>
+            <input type="password" value={pw2} onChange={(e) => setPw2(e.target.value)} style={inputStyle} onKeyDown={(e) => e.key === "Enter" && handleSave()} />
+            {error && <ErrorLine text={error} />}
+            <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
+              <button onClick={onClose} className="btn-secondary" style={{ ...secondaryBtn, flex: 1, justifyContent: "center" }}>Cancelar</button>
+              <button onClick={handleSave} disabled={busy} className="btn-primary" style={{ ...primaryBtn, flex: 1, marginTop: 0 }}>{busy ? "Salvando..." : "Salvar"}</button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
