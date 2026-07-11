@@ -7,7 +7,7 @@ router.use(requireAuth);
 
 router.get("/criterios", async (req, res, next) => {
   try {
-    const { rows } = await pool.query("SELECT id, label, ordem FROM sirs_criterios_catalogo ORDER BY ordem");
+    const { rows } = await pool.query("SELECT id, label, ordem, categoria FROM sirs_criterios_catalogo ORDER BY ordem");
     res.json(rows);
   } catch (err) {
     next(err);
@@ -37,19 +37,28 @@ router.post("/", async (req, res, next) => {
     const {
       dataAtendimento, horaAtendimento, nomePaciente, numeroAtendimento,
       sirs = {}, focoInfeccao = [], antibioticos = [],
+      horaAntibiotico = null, classificacao = null,
     } = req.body || {};
 
     if (!nomePaciente?.trim() || !numeroAtendimento?.trim() || !dataAtendimento || !horaAtendimento) {
       return res.status(400).json({ error: "Preencha data, hora, paciente e número do atendimento." });
+    }
+    if (classificacao && !["sirs", "sepse", "choque_septico"].includes(classificacao)) {
+      return res.status(400).json({ error: "Classificação inválida." });
+    }
+    if (horaAntibiotico && !/^\d{2}:\d{2}(:\d{2})?$/.test(horaAntibiotico)) {
+      return res.status(400).json({ error: "Hora de administração do antibiótico inválida." });
     }
 
     const criterioIds = Object.keys(sirs).filter((k) => sirs[k]);
 
     const atendimento = await withTransaction(async (client) => {
       const { rows } = await client.query(
-        `INSERT INTO atendimentos (paciente_nome, numero_atendimento, data_atendimento, hora_atendimento, medico_id)
-         VALUES ($1, $2, $3, $4, $5) RETURNING id, created_at`,
-        [nomePaciente.trim(), numeroAtendimento.trim(), dataAtendimento, horaAtendimento, req.user.sub]
+        `INSERT INTO atendimentos (paciente_nome, numero_atendimento, data_atendimento, hora_atendimento,
+                                   hora_administracao_atb, classificacao, medico_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, created_at`,
+        [nomePaciente.trim(), numeroAtendimento.trim(), dataAtendimento, horaAtendimento,
+         horaAntibiotico || null, classificacao || null, req.user.sub]
       );
       const atendimentoId = rows[0].id;
 
@@ -123,6 +132,7 @@ router.get("/", async (req, res, next) => {
 
     const { rows } = await pool.query(
       `SELECT r.id, r.paciente_nome, r.numero_atendimento, r.data_atendimento, r.hora_atendimento,
+              r.hora_administracao_atb, r.porta_atb_min, r.classificacao,
               r.medico_nome, r.medico_crm, r.total_criterios, r.created_at
        FROM vw_atendimentos_resumo r ${where} ${limitClause}`,
       params
@@ -148,6 +158,7 @@ router.get("/export/data", async (req, res, next) => {
 
     const { rows } = await pool.query(
       `SELECT r.data_atendimento, r.hora_atendimento, r.paciente_nome, r.numero_atendimento,
+              r.hora_administracao_atb, r.porta_atb_min, r.classificacao,
               r.total_criterios, r.medico_nome, r.medico_crm, r.created_at,
               (SELECT string_agg(c.label, '; ' ORDER BY c.ordem)
                  FROM atendimento_criterios ac JOIN sirs_criterios_catalogo c ON c.id = ac.criterio_id
