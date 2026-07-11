@@ -76,9 +76,40 @@ router.get("/painel", async (req, res, next) => {
       [de, ate]
     );
 
-    const [byDay, byFoco, byAtb, summary, kpi, byMonth, byClassif] = await Promise.all([
-      byDayQ, byFocoQ, byAtbQ, summaryQ, kpiQ, byMonthQ, byClassifQ,
+    // Status dos casos no periodo (fila de acompanhamento)
+    const statusQ = pool.query(
+      `SELECT status AS name, count(*)::int AS value
+       FROM vw_atendimentos_resumo
+       WHERE data_atendimento BETWEEN $1 AND $2
+       GROUP BY 1`,
+      [de, ate]
+    );
+
+    // Desfechos: classificacao final e destino dos casos encerrados no periodo
+    const byClassifFinalQ = pool.query(
+      `SELECT classificacao_final AS name, count(*)::int AS value
+       FROM vw_atendimentos_resumo
+       WHERE data_atendimento BETWEEN $1 AND $2 AND classificacao_final IS NOT NULL
+       GROUP BY 1 ORDER BY value DESC`,
+      [de, ate]
+    );
+    const byDestinoQ = pool.query(
+      `SELECT destino AS name, count(*)::int AS value
+       FROM vw_atendimentos_resumo
+       WHERE data_atendimento BETWEEN $1 AND $2 AND destino IS NOT NULL
+       GROUP BY 1 ORDER BY value DESC`,
+      [de, ate]
+    );
+
+    const [byDay, byFoco, byAtb, summary, kpi, byMonth, byClassif, byStatus, byClassifFinal, byDestino] = await Promise.all([
+      byDayQ, byFocoQ, byAtbQ, summaryQ, kpiQ, byMonthQ, byClassifQ, statusQ, byClassifFinalQ, byDestinoQ,
     ]);
+
+    const encerrados = byClassifFinal.rows.reduce((s, r) => s + r.value, 0);
+    const confirmados = byClassifFinal.rows
+      .filter((r) => r.name === "sepse_confirmada" || r.name === "choque_septico")
+      .reduce((s, r) => s + r.value, 0);
+    const obitos = byDestino.rows.find((r) => r.name === "obito")?.value ?? 0;
 
     const k = kpi.rows[0];
     res.json({
@@ -97,6 +128,14 @@ router.get("/painel", async (req, res, next) => {
         pctMeta: r.com_atb ? Math.round((100 * r.dentro_meta) / r.com_atb) : null,
       })),
       byClassif: byClassif.rows,
+      byStatus: byStatus.rows,
+      desfechos: {
+        encerrados,
+        taxaConfirmacao: encerrados ? Math.round((100 * confirmados) / encerrados) : null,
+        mortalidade: encerrados ? Math.round((100 * obitos) / encerrados) : null,
+        byClassifFinal: byClassifFinal.rows,
+        byDestino: byDestino.rows,
+      },
       byDay: byDay.rows.map((r) => ({
         data: r.data.split("-").reverse().join("/"),
         total: r.total,

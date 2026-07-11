@@ -37,7 +37,7 @@ router.post("/", async (req, res, next) => {
     const {
       dataAtendimento, horaAtendimento, nomePaciente, numeroAtendimento,
       sirs = {}, focoInfeccao = [], antibioticos = [],
-      horaAntibiotico = null, classificacao = null,
+      horaPrescricao = null, horaAntibiotico = null, classificacao = null,
     } = req.body || {};
 
     if (!nomePaciente?.trim() || !numeroAtendimento?.trim() || !dataAtendimento || !horaAtendimento) {
@@ -46,8 +46,10 @@ router.post("/", async (req, res, next) => {
     if (classificacao && !["sirs", "sepse", "choque_septico"].includes(classificacao)) {
       return res.status(400).json({ error: "Classificação inválida." });
     }
-    if (horaAntibiotico && !/^\d{2}:\d{2}(:\d{2})?$/.test(horaAntibiotico)) {
-      return res.status(400).json({ error: "Hora de administração do antibiótico inválida." });
+    for (const [nome, valor] of [["prescrição", horaPrescricao], ["administração", horaAntibiotico]]) {
+      if (valor && !/^\d{2}:\d{2}(:\d{2})?$/.test(valor)) {
+        return res.status(400).json({ error: `Hora de ${nome} do antibiótico inválida.` });
+      }
     }
 
     const criterioIds = Object.keys(sirs).filter((k) => sirs[k]);
@@ -55,10 +57,10 @@ router.post("/", async (req, res, next) => {
     const atendimento = await withTransaction(async (client) => {
       const { rows } = await client.query(
         `INSERT INTO atendimentos (paciente_nome, numero_atendimento, data_atendimento, hora_atendimento,
-                                   hora_administracao_atb, classificacao, medico_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, created_at`,
+                                   hora_prescricao_atb, hora_administracao_atb, classificacao, medico_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, created_at`,
         [nomePaciente.trim(), numeroAtendimento.trim(), dataAtendimento, horaAtendimento,
-         horaAntibiotico || null, classificacao || null, req.user.sub]
+         horaPrescricao || null, horaAntibiotico || null, classificacao || null, req.user.sub]
       );
       const atendimentoId = rows[0].id;
 
@@ -102,7 +104,7 @@ router.post("/", async (req, res, next) => {
 
 router.get("/", async (req, res, next) => {
   try {
-    const { nome, numero, de, ate, page = "1", perPage = "10", all } = req.query;
+    const { nome, numero, de, ate, status, page = "1", perPage = "10", all } = req.query;
     const conditions = [];
     const params = [];
 
@@ -110,6 +112,12 @@ router.get("/", async (req, res, next) => {
     if (numero) { params.push(`%${numero.toLowerCase()}%`); conditions.push(`lower(r.numero_atendimento) LIKE $${params.length}`); }
     if (de) { params.push(de); conditions.push(`r.data_atendimento >= $${params.length}`); }
     if (ate) { params.push(ate); conditions.push(`r.data_atendimento <= $${params.length}`); }
+    if (status === "aberto") {
+      conditions.push(`r.status <> 'encerrado'`);
+    } else if (status) {
+      params.push(status);
+      conditions.push(`r.status = $${params.length}`);
+    }
 
     const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
 
@@ -132,7 +140,8 @@ router.get("/", async (req, res, next) => {
 
     const { rows } = await pool.query(
       `SELECT r.id, r.paciente_nome, r.numero_atendimento, r.data_atendimento, r.hora_atendimento,
-              r.hora_administracao_atb, r.porta_atb_min, r.classificacao,
+              r.hora_prescricao_atb, r.hora_administracao_atb, r.porta_atb_min, r.classificacao,
+              r.status, r.classificacao_final, r.destino, r.data_desfecho,
               r.medico_nome, r.medico_crm, r.total_criterios, r.created_at
        FROM vw_atendimentos_resumo r ${where} ${limitClause}`,
       params
@@ -158,7 +167,9 @@ router.get("/export/data", async (req, res, next) => {
 
     const { rows } = await pool.query(
       `SELECT r.data_atendimento, r.hora_atendimento, r.paciente_nome, r.numero_atendimento,
-              r.hora_administracao_atb, r.porta_atb_min, r.classificacao,
+              r.hora_prescricao_atb, r.hora_administracao_atb, r.porta_atb_min, r.classificacao,
+              r.status, r.classificacao_final, r.indicacao_adequada, r.foco_confirmado,
+              r.culturas_colhidas, r.cultura_positiva, r.destino, r.data_desfecho,
               r.total_criterios, r.medico_nome, r.medico_crm, r.created_at,
               (SELECT string_agg(c.label, '; ' ORDER BY c.ordem)
                  FROM atendimento_criterios ac JOIN sirs_criterios_catalogo c ON c.id = ac.criterio_id
@@ -174,6 +185,85 @@ router.get("/export/data", async (req, res, next) => {
       params
     );
     res.json(rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Lançamento posterior de dados do caso: tempos do ATB, classificação e desfecho.
+router.patch("/:id", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const {
+      horaPrescricao, horaAntibiotico, classificacao,
+      desfecho, // { classificacaoFinal, destino, indicacaoAdequada, focoConfirmado, culturasColhidas, culturaPositiva, dataDesfecho, observacoes }
+    } = req.body || {};
+
+    for (const [nome, valor] of [["prescrição", horaPrescricao], ["administração", horaAntibiotico]]) {
+      if (valor && !/^\d{2}:\d{2}(:\d{2})?$/.test(valor)) {
+        return res.status(400).json({ error: `Hora de ${nome} do antibiótico inválida.` });
+      }
+    }
+    if (classificacao && !["sirs", "sepse", "choque_septico"].includes(classificacao)) {
+      return res.status(400).json({ error: "Classificação inválida." });
+    }
+    if (desfecho) {
+      if (!["sepse_confirmada", "choque_septico", "infeccao_sem_sepse", "descartado"].includes(desfecho.classificacaoFinal)) {
+        return res.status(400).json({ error: "Classificação final do desfecho inválida." });
+      }
+      if (!["alta", "enfermaria", "uti", "obito", "transferencia"].includes(desfecho.destino)) {
+        return res.status(400).json({ error: "Destino do desfecho inválido." });
+      }
+    }
+
+    const updated = await withTransaction(async (client) => {
+      const { rows } = await client.query("SELECT id FROM atendimentos WHERE id = $1 FOR UPDATE", [id]);
+      if (!rows[0]) return null;
+
+      await client.query(
+        `UPDATE atendimentos SET
+           hora_prescricao_atb    = COALESCE($2, hora_prescricao_atb),
+           hora_administracao_atb = COALESCE($3, hora_administracao_atb),
+           classificacao          = COALESCE($4, classificacao)
+         WHERE id = $1`,
+        [id, horaPrescricao || null, horaAntibiotico || null, classificacao || null]
+      );
+
+      if (desfecho) {
+        await client.query(
+          `INSERT INTO atendimento_desfechos
+             (atendimento_id, classificacao_final, destino, indicacao_adequada, foco_confirmado,
+              culturas_colhidas, cultura_positiva, data_desfecho, observacoes, revisado_por)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+           ON CONFLICT (atendimento_id) DO UPDATE SET
+             classificacao_final = EXCLUDED.classificacao_final,
+             destino             = EXCLUDED.destino,
+             indicacao_adequada  = EXCLUDED.indicacao_adequada,
+             foco_confirmado     = EXCLUDED.foco_confirmado,
+             culturas_colhidas   = EXCLUDED.culturas_colhidas,
+             cultura_positiva    = EXCLUDED.cultura_positiva,
+             data_desfecho       = EXCLUDED.data_desfecho,
+             observacoes         = EXCLUDED.observacoes,
+             revisado_por        = EXCLUDED.revisado_por,
+             revisado_em         = now()`,
+          [id, desfecho.classificacaoFinal, desfecho.destino,
+           desfecho.indicacaoAdequada ?? null, desfecho.focoConfirmado ?? null,
+           desfecho.culturasColhidas ?? null, desfecho.culturaPositiva ?? null,
+           desfecho.dataDesfecho || null, desfecho.observacoes?.trim() || null, req.user.sub]
+        );
+      }
+
+      await client.query(
+        `INSERT INTO audit_log (medico_id, acao, entidade, entidade_id, ip)
+         VALUES ($1, $2, 'atendimento', $3, $4)`,
+        [req.user.sub, desfecho ? "encerrar_ficha" : "atualizar_ficha", id, req.ip]
+      );
+      return true;
+    });
+
+    if (!updated) return res.status(404).json({ error: "Ficha não encontrada." });
+    const { rows } = await pool.query("SELECT * FROM vw_atendimentos_resumo WHERE id = $1", [id]);
+    res.json(rows[0]);
   } catch (err) {
     next(err);
   }

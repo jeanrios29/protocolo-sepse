@@ -1,6 +1,8 @@
 -- Dados FICTÍCIOS de demonstração — apenas para ambiente local/apresentação.
 -- Cria médicos de teste (senha: demo123) e ~150 fichas nos últimos 90 dias
--- com tendência de melhora no KPI porta-antibiótico.
+-- com tendência de melhora no KPI porta-antibiótico, prescrição/administração
+-- separadas e desfechos lançados para a maior parte dos casos antigos
+-- (os recentes ficam pendentes, para demonstrar a fila de acompanhamento).
 
 INSERT INTO medicos (nome, crm, password_hash, role) VALUES
     ('Jean Rios Novaes Silva', '32.394', '$2a$10$GVFLJz9hDbd5KWo3nYEjY.YRKuq9nIFz3TPJeK6nOTCSMJfbsmC6e', 'master'),
@@ -28,8 +30,11 @@ DECLARE
     hh int; mm int;
     abertura time;
     delta int;
+    delta_presc int;
     idade_dias int;
     classif text;
+    classif_final text;
+    destino_pick text;
     n_crit int;
     crit_ids text[];
     foco_id_pick smallint;
@@ -68,17 +73,52 @@ BEGIN
                 ELSE NULL
             END;
 
+            -- prescrição alguns minutos antes da administração
+            delta_presc := CASE WHEN delta IS NULL THEN NULL
+                                ELSE greatest(2, delta - 10 - floor(random() * 25)::int) END;
+
             INSERT INTO atendimentos (paciente_nome, numero_atendimento, data_atendimento, hora_atendimento,
-                                      hora_administracao_atb, classificacao, medico_id)
+                                      hora_prescricao_atb, hora_administracao_atb, classificacao, medico_id)
             VALUES (
                 nomes[1 + floor(random() * array_length(nomes, 1))::int],
                 to_char(d, 'YYYY') || lpad(floor(random() * 999999)::text, 6, '0'),
                 d, abertura,
+                CASE WHEN delta_presc IS NULL THEN NULL
+                     ELSE (abertura + (delta_presc || ' minutes')::interval)::time END,
                 CASE WHEN delta IS NULL THEN NULL
                      ELSE (abertura + (delta || ' minutes')::interval)::time END,
                 classif,
                 med_ids[1 + floor(random() * array_length(med_ids, 1))::int]
             ) RETURNING id INTO a_id;
+
+            -- Desfecho: casos com mais de ~5 dias são encerrados em sua maioria
+            IF idade_dias > 5 AND delta IS NOT NULL AND random() < 0.85 THEN
+                r := random();
+                classif_final := CASE
+                    WHEN classif = 'choque_septico' THEN (CASE WHEN r < 0.85 THEN 'choque_septico' ELSE 'sepse_confirmada' END)
+                    WHEN classif = 'sepse' THEN (CASE WHEN r < 0.70 THEN 'sepse_confirmada' WHEN r < 0.90 THEN 'infeccao_sem_sepse' ELSE 'descartado' END)
+                    ELSE (CASE WHEN r < 0.30 THEN 'sepse_confirmada' WHEN r < 0.75 THEN 'infeccao_sem_sepse' ELSE 'descartado' END)
+                END;
+                r := random();
+                destino_pick := CASE
+                    WHEN classif = 'choque_septico' THEN (CASE WHEN r < 0.35 THEN 'obito' WHEN r < 0.85 THEN 'uti' ELSE 'enfermaria' END)
+                    WHEN r < 0.50 THEN 'alta'
+                    WHEN r < 0.75 THEN 'enfermaria'
+                    WHEN r < 0.90 THEN 'uti'
+                    WHEN r < 0.96 THEN 'obito'
+                    ELSE 'transferencia'
+                END;
+                INSERT INTO atendimento_desfechos
+                    (atendimento_id, classificacao_final, destino, indicacao_adequada, foco_confirmado,
+                     culturas_colhidas, cultura_positiva, data_desfecho, revisado_por)
+                VALUES (
+                    a_id, classif_final, destino_pick,
+                    random() < 0.88, random() < 0.75,
+                    random() < 0.90, random() < 0.45,
+                    d + (2 + floor(random() * 6)::int),
+                    med_ids[1 + floor(random() * array_length(med_ids, 1))::int]
+                );
+            END IF;
 
             -- Critérios coerentes com a classificação
             n_crit := CASE classif

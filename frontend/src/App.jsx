@@ -56,6 +56,29 @@ const CLASSIF_LABEL = {
   sirs: "SIRS", sepse: "Sepse", choque_septico: "Choque séptico", nao_classificado: "Não classificado",
 };
 
+const STATUS_META = {
+  pendente_atb: { label: "ATB pendente", tone: "red" },
+  aguardando_desfecho: { label: "Aguardando desfecho", tone: "amber" },
+  encerrado: { label: "Encerrado", tone: "green" },
+};
+
+const CLASSIF_FINAL = [
+  { id: "sepse_confirmada", label: "Sepse confirmada" },
+  { id: "choque_septico", label: "Choque séptico" },
+  { id: "infeccao_sem_sepse", label: "Infecção sem sepse" },
+  { id: "descartado", label: "Descartado" },
+];
+const CLASSIF_FINAL_LABEL = Object.fromEntries(CLASSIF_FINAL.map((c) => [c.id, c.label]));
+
+const DESTINOS = [
+  { id: "alta", label: "Alta" },
+  { id: "enfermaria", label: "Enfermaria" },
+  { id: "uti", label: "UTI" },
+  { id: "obito", label: "Óbito" },
+  { id: "transferencia", label: "Transferência" },
+];
+const DESTINO_LABEL = Object.fromEntries(DESTINOS.map((d) => [d.id, d.label]));
+
 const META_MIN = 60; // meta institucional: antibiótico em até 60 minutos
 
 /* ---------------------------------------------------------------------- */
@@ -394,13 +417,57 @@ function emptyFicha() {
     sirs: {},
     focoInfeccao: [],
     antibioticos: [],
+    horaPrescricao: "",
     horaAntibiotico: "",
     classificacao: null,
   };
 }
 
+/* Gate: confirma a hora REAL de abertura antes de liberar o formulário —
+   quem digita geralmente o faz minutos depois da abertura, e o cronômetro
+   só é fidedigno contando do horário confirmado. */
+function AberturaGate({ onConfirm }) {
+  const [data, setData] = useState(todayISO());
+  const [hora, setHora] = useState(nowHM());
+  return (
+    <Card className="anim-card pulse-red" style={{ maxWidth: 560, margin: "24px auto", border: `2px solid ${C.red}`, padding: 28 }}>
+      <div style={{ display: "flex", justifyContent: "center", marginBottom: 14 }}>
+        <div style={{ width: 62, height: 62, borderRadius: 999, background: C.redBg, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <Timer size={30} color={C.red} />
+        </div>
+      </div>
+      <h2 style={{ margin: "0 0 6px", textAlign: "center", fontSize: 19, fontWeight: 800, color: C.ink }}>
+        Qual foi a hora real da abertura da ficha?
+      </h2>
+      <p style={{ margin: "0 0 18px", textAlign: "center", fontSize: 13.5, color: C.inkSoft, lineHeight: 1.55 }}>
+        A meta de <strong style={{ color: C.red }}>antibiótico em até 1 hora</strong> conta a partir da abertura do protocolo
+        à beira-leito — <strong>não</strong> da hora em que você está digitando. Confirme o horário para iniciar o cronômetro
+        com dado fidedigno.
+      </p>
+      <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
+        <div>
+          <label style={{ ...labelStyle, marginTop: 0 }}>Data da abertura</label>
+          <input type="date" value={data} onChange={(e) => setData(e.target.value)} style={{ ...inputStyle, fontSize: 16 }} />
+        </div>
+        <div>
+          <label style={{ ...labelStyle, marginTop: 0 }}>Hora da abertura</label>
+          <input type="time" value={hora} onChange={(e) => setHora(e.target.value)} style={{ ...inputStyle, fontSize: 20, fontWeight: 700, color: C.red }} autoFocus />
+        </div>
+      </div>
+      <button
+        type="button" className="btn-primary"
+        onClick={() => data && hora && onConfirm({ data, hora })}
+        style={{ ...primaryBtn, background: C.red, marginTop: 22, fontSize: 15, padding: "13px 0" }}
+      >
+        Confirmar abertura e iniciar cronômetro
+      </button>
+    </Card>
+  );
+}
+
 function NovaFichaTab({ user, catalogos, onSaved }) {
   const [f, setF] = useState(() => emptyFicha());
+  const [aberturaOk, setAberturaOk] = useState(false);
   const [savedFicha, setSavedFicha] = useState(null);
   const [errors, setErrors] = useState({});
   const [error, setError] = useState("");
@@ -453,8 +520,10 @@ function NovaFichaTab({ user, catalogos, onSaved }) {
         antibioticos: f.antibioticos,
         portaMin: portaAtbMin(f.horaAtendimento, f.horaAntibiotico),
         classificacao: f.classificacao,
+        pendente: !f.horaAntibiotico,
       });
       setF(emptyFicha());
+      setAberturaOk(false);
       setErrors({});
       onSaved?.();
     } catch (err) {
@@ -464,6 +533,15 @@ function NovaFichaTab({ user, catalogos, onSaved }) {
     }
   }
 
+  if (!aberturaOk) {
+    return (
+      <>
+        <AberturaGate onConfirm={({ data, hora }) => { setF((p) => ({ ...p, dataAtendimento: data, horaAtendimento: hora })); setAberturaOk(true); }} />
+        {savedFicha && <SavedOverlay ficha={savedFicha} onClose={() => setSavedFicha(null)} />}
+      </>
+    );
+  }
+
   return (
     <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 18, maxWidth: 880 }}>
       {error && <ErrorLine text={error} />}
@@ -471,13 +549,17 @@ function NovaFichaTab({ user, catalogos, onSaved }) {
       <MetaTimer dataAtendimento={f.dataAtendimento} horaAtendimento={f.horaAtendimento} horaAntibiotico={f.horaAntibiotico} />
 
       <Card className="anim-card">
-        <SectionTitle icon={<ClipboardList size={16} />} title="Dados do atendimento" />
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+          <SectionTitle icon={<ClipboardList size={16} />} title="Dados do atendimento" />
+          <button type="button" onClick={() => setAberturaOk(false)} style={{ background: "none", border: "none", color: C.teal, fontSize: 12.5, fontWeight: 700, cursor: "pointer", textDecoration: "underline" }}>
+            Corrigir hora de abertura
+          </button>
+        </div>
         <div style={grid2}>
-          <Field label="Data do atendimento" error={errors.dataAtendimento}>
-            <input type="date" value={f.dataAtendimento} onChange={(e) => setF({ ...f, dataAtendimento: e.target.value })} style={fieldInput(errors.dataAtendimento)} />
-          </Field>
-          <Field label="Hora da abertura da ficha" error={errors.horaAtendimento}>
-            <input type="time" value={f.horaAtendimento} onChange={(e) => setF({ ...f, horaAtendimento: e.target.value })} style={fieldInput(errors.horaAtendimento)} />
+          <Field label="Abertura confirmada">
+            <div style={{ ...inputStyle, background: "#f6fafa", display: "flex", alignItems: "center", gap: 8, fontWeight: 700, color: C.tealDark }}>
+              <Timer size={15} /> {f.dataAtendimento.split("-").reverse().join("/")} às {f.horaAtendimento}
+            </div>
           </Field>
           <Field label="Nome do paciente" error={errors.nomePaciente}>
             <input value={f.nomePaciente} onChange={(e) => setF({ ...f, nomePaciente: e.target.value })} style={fieldInput(errors.nomePaciente)} placeholder="Nome completo" />
@@ -551,26 +633,16 @@ function NovaFichaTab({ user, catalogos, onSaved }) {
         <ChipGroup options={catalogos.antibioticos} selected={f.antibioticos} onToggle={toggleAntibiotico} />
 
         <div style={{ marginTop: 18, paddingTop: 16, borderTop: `1px dashed ${C.line}` }}>
-          <div style={{ display: "flex", alignItems: "flex-end", gap: 10, flexWrap: "wrap" }}>
-            <div style={{ minWidth: 200 }}>
-              <Field label="Hora da administração do antibiótico" error={errors.horaAntibiotico}>
-                <input type="time" value={f.horaAntibiotico} onChange={(e) => setF({ ...f, horaAntibiotico: e.target.value })} style={fieldInput(errors.horaAntibiotico)} />
-              </Field>
-            </div>
-            <button type="button" className="btn-secondary" style={{ ...secondaryBtn, marginBottom: errors.horaAntibiotico ? 22 : 1 }} onClick={() => setF({ ...f, horaAntibiotico: nowHM() })}>
-              <Syringe size={15} /> Agora
-            </button>
-            {f.horaAntibiotico && (
-              <div style={{ marginBottom: errors.horaAntibiotico ? 22 : 4 }}>
-                {(() => {
-                  const d = portaAtbMin(f.horaAtendimento, f.horaAntibiotico);
-                  return <Badge tone={d <= META_MIN ? "green" : "red"}>Porta-antibiótico: {fmtMin(d)} {d <= META_MIN ? "· dentro da meta" : "· fora da meta"}</Badge>;
-                })()}
-              </div>
-            )}
-          </div>
+          <TemposAtb
+            horaAbertura={f.horaAtendimento}
+            horaPrescricao={f.horaPrescricao}
+            horaAntibiotico={f.horaAntibiotico}
+            error={errors.horaAntibiotico}
+            onChange={(patch) => setF({ ...f, ...patch })}
+          />
           <div style={{ fontSize: 12, color: C.inkSoft, marginTop: 6 }}>
-            Se o antibiótico ainda não foi administrado, deixe em branco — a ficha pode ser registrada e o dado completado depois.
+            Se o antibiótico ainda não foi prescrito/administrado, deixe em branco — o caso ficará
+            <strong> em acompanhamento</strong> e os horários podem ser lançados depois.
           </div>
         </div>
       </Card>
@@ -624,6 +696,40 @@ function CriterioGroup({ title, subtitle, items, sirs, onToggle }) {
   );
 }
 
+/* Prescrição e administração do ATB, lado a lado, com botão "Agora" e delta ao vivo */
+function TemposAtb({ horaAbertura, horaPrescricao, horaAntibiotico, error, onChange }) {
+  const delta = portaAtbMin(horaAbertura, horaAntibiotico);
+  return (
+    <div style={{ display: "flex", alignItems: "flex-end", gap: 18, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 8 }}>
+        <div style={{ minWidth: 170 }}>
+          <Field label="Hora da prescrição">
+            <input type="time" value={horaPrescricao} onChange={(e) => onChange({ horaPrescricao: e.target.value })} style={inputStyle} />
+          </Field>
+        </div>
+        <button type="button" className="btn-secondary" style={{ ...secondaryBtn, marginBottom: 1 }} onClick={() => onChange({ horaPrescricao: nowHM() })}>
+          Agora
+        </button>
+      </div>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 8 }}>
+        <div style={{ minWidth: 170 }}>
+          <Field label="Hora da administração" error={error}>
+            <input type="time" value={horaAntibiotico} onChange={(e) => onChange({ horaAntibiotico: e.target.value })} style={fieldInput(error)} />
+          </Field>
+        </div>
+        <button type="button" className="btn-secondary" style={{ ...secondaryBtn, marginBottom: error ? 22 : 1 }} onClick={() => onChange({ horaAntibiotico: nowHM() })}>
+          <Syringe size={15} /> Agora
+        </button>
+      </div>
+      {delta != null && (
+        <div style={{ marginBottom: 4 }}>
+          <Badge tone={delta <= META_MIN ? "green" : "red"}>Porta-antibiótico: {fmtMin(delta)} {delta <= META_MIN ? "· dentro da meta" : "· fora da meta"}</Badge>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SavedOverlay({ ficha, onClose }) {
   const ok = ficha.portaMin != null && ficha.portaMin <= META_MIN;
   return (
@@ -645,6 +751,11 @@ function SavedOverlay({ ficha, onClose }) {
         {ficha.portaMin != null && (
           <div style={{ marginTop: 12 }}>
             <Badge tone={ok ? "green" : "red"}>Porta-antibiótico: {fmtMin(ficha.portaMin)} {ok ? "· dentro da meta" : "· fora da meta"}</Badge>
+          </div>
+        )}
+        {ficha.pendente && (
+          <div style={{ marginTop: 12, fontSize: 12.5, color: C.amber, background: C.amberBg, borderRadius: 9, padding: "8px 12px", fontWeight: 600 }}>
+            Antibiótico ainda não administrado — o caso entrou na fila de <strong>Acompanhamento</strong> para lançamento dos horários e do desfecho.
           </div>
         )}
         <button onClick={onClose} className="btn-primary" style={{ ...primaryBtn, marginTop: 20 }}>Nova ficha</button>
@@ -701,6 +812,335 @@ function ChipGroup({ options, selected, onToggle }) {
 }
 
 const grid2 = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px,1fr))", gap: 14 };
+
+/* ---------------------------------------------------------------------- */
+/*  Acompanhamento — fila de casos por status                              */
+/* ---------------------------------------------------------------------- */
+
+const STATUS_COLOR = { pendente_atb: C.red, aguardando_desfecho: C.amber, encerrado: C.green };
+
+const ACOMP_FILTERS = [
+  { id: "aberto", label: "Casos abertos" },
+  { id: "pendente_atb", label: "ATB pendente" },
+  { id: "aguardando_desfecho", label: "Aguardando desfecho" },
+  { id: "encerrado", label: "Encerrados" },
+  { id: "", label: "Todos" },
+];
+
+function tempoAberto(f) {
+  const abertura = new Date(`${f.data_atendimento}T${(f.hora_atendimento || "00:00").slice(0, 5)}:00`);
+  const min = Math.max(0, Math.floor((Date.now() - abertura.getTime()) / 60000));
+  if (min < 60) return `${min} min`;
+  if (min < 48 * 60) return `${Math.floor(min / 60)}h`;
+  return `${Math.floor(min / 1440)} dias`;
+}
+
+function AcompanhamentoTab({ refreshKey, onNovaFicha }) {
+  const [statusFilter, setStatusFilter] = useState("aberto");
+  const [page, setPage] = useState(1);
+  const perPage = 8;
+  const [result, setResult] = useState({ total: 0, items: [] });
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [bump, setBump] = useState(0);
+
+  useEffect(() => setPage(1), [statusFilter]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setLoadError(false);
+    const params = { page, perPage };
+    if (statusFilter) params.status = statusFilter;
+    api.listFichas(params)
+      .then((r) => !cancelled && setResult(r))
+      .catch(() => {
+        if (!cancelled) { setResult({ total: 0, items: [] }); setLoadError(true); }
+      })
+      .finally(() => !cancelled && setLoading(false));
+    return () => { cancelled = true; };
+  }, [statusFilter, page, refreshKey, bump]);
+
+  const totalPages = Math.max(1, Math.ceil(result.total / perPage));
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <Card className="anim-card">
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+          <SectionTitle icon={<HeartPulse size={16} />} title="Pacientes em acompanhamento" />
+          <span style={{ fontSize: 12.5, color: C.inkSoft }}>{result.total} caso(s)</span>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {ACOMP_FILTERS.map((s) => {
+            const on = statusFilter === s.id;
+            const dot = STATUS_COLOR[s.id];
+            return (
+              <button key={s.id} type="button" className="chip" onClick={() => setStatusFilter(s.id)}
+                style={{
+                  padding: "7px 14px", borderRadius: 999, fontSize: 12.5, fontWeight: 700, cursor: "pointer",
+                  display: "inline-flex", alignItems: "center", gap: 7,
+                  border: `1.5px solid ${on ? C.teal : C.line}`, background: on ? C.tealBg : "#fff", color: C.tealDark,
+                }}>
+                {dot && <span style={{ width: 8, height: 8, borderRadius: 999, background: dot }} />}
+                {s.label}
+              </button>
+            );
+          })}
+        </div>
+      </Card>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {loading && [...Array(4)].map((_, i) => <Card key={i}><Skeleton h={54} /></Card>)}
+        {!loading && loadError && (
+          <Card><EmptyState icon={<AlertTriangle size={44} />} title="Não foi possível carregar os casos" subtitle="Verifique a conexão e tente novamente." /></Card>
+        )}
+        {!loading && !loadError && !result.items.length && (
+          <Card>
+            <EmptyState icon={<CheckCircle2 size={44} />} title={statusFilter === "pendente_atb" ? "Nenhum paciente aguardando antibiótico" : "Nenhum caso neste filtro"} subtitle="Bom sinal — a fila está em dia." />
+            {onNovaFicha && (
+              <div style={{ textAlign: "center", paddingBottom: 10 }}>
+                <button type="button" onClick={onNovaFicha} className="btn-secondary" style={secondaryBtn}><Plus size={15} /> Abrir novo protocolo</button>
+              </div>
+            )}
+          </Card>
+        )}
+        {!loading && result.items.map((f) => {
+          const st = STATUS_META[f.status] || { label: f.status, tone: "gray" };
+          const cor = STATUS_COLOR[f.status] || C.inkSoft;
+          return (
+            <Card key={f.id} className="anim-card" style={{ padding: 0, overflow: "hidden" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", borderLeft: `5px solid ${cor}`, flexWrap: "wrap" }}>
+                <div style={{ flex: "1 1 220px", minWidth: 0 }}>
+                  <div style={{ fontWeight: 800, fontSize: 14.5, color: C.ink }}>{f.paciente_nome}</div>
+                  <div style={{ fontSize: 12, color: C.inkSoft, marginTop: 2 }}>
+                    Nº {f.numero_atendimento} · aberto em {f.data_atendimento?.split("-").reverse().join("/")} às {f.hora_atendimento?.slice(0, 5)} · {f.medico_nome}
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 7, alignItems: "center", flexWrap: "wrap" }}>
+                  <Badge tone={st.tone}>{st.label}</Badge>
+                  {f.status === "pendente_atb" && <Badge tone="red">aberto há {tempoAberto(f)}</Badge>}
+                  {f.classificacao && <Badge tone="gray">{CLASSIF_LABEL[f.classificacao]}</Badge>}
+                  {f.porta_atb_min != null && <PortaAtbBadge min={f.porta_atb_min} />}
+                  {f.classificacao_final && <Badge tone="teal">{CLASSIF_FINAL_LABEL[f.classificacao_final]}</Badge>}
+                  {f.destino && <Badge tone={f.destino === "obito" ? "red" : "gray"}>{DESTINO_LABEL[f.destino]}</Badge>}
+                </div>
+                <button onClick={() => setEditing(f.id)} className={f.status === "encerrado" ? "btn-secondary" : "btn-primary"}
+                  style={f.status === "encerrado"
+                    ? { ...secondaryBtn, padding: "7px 14px", fontSize: 12.5 }
+                    : { ...primaryBtn, width: "auto", marginTop: 0, padding: "8px 16px", fontSize: 12.5 }}>
+                  {f.status === "encerrado" ? "Revisar" : "Lançar dados"}
+                </button>
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+
+      {result.total > perPage && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 14 }}>
+          <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1} style={pageBtn} aria-label="Página anterior"><ChevronLeft size={16} /></button>
+          <span style={{ fontSize: 13, color: C.inkSoft }}>Página {page} de {totalPages}</span>
+          <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages} style={pageBtn} aria-label="Próxima página"><ChevronRight size={16} /></button>
+        </div>
+      )}
+
+      {editing && (
+        <LancamentoModal
+          fichaId={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); setBump((b) => b + 1); }}
+        />
+      )}
+    </div>
+  );
+}
+
+/* Modal de lançamento posterior: tempos do ATB, classificação e desfecho */
+function LancamentoModal({ fichaId, onClose, onSaved }) {
+  const [ficha, setFicha] = useState(null);
+  const [form, setForm] = useState(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api.fichaDetail(fichaId).then((d) => {
+      setFicha(d);
+      setForm({
+        horaPrescricao: d.hora_prescricao_atb?.slice(0, 5) || "",
+        horaAntibiotico: d.hora_administracao_atb?.slice(0, 5) || "",
+        classificacao: d.classificacao || null,
+        classificacaoFinal: d.classificacao_final || null,
+        destino: d.destino || null,
+        indicacaoAdequada: d.indicacao_adequada,
+        focoConfirmado: d.foco_confirmado,
+        culturasColhidas: d.culturas_colhidas,
+        culturaPositiva: d.cultura_positiva,
+        dataDesfecho: d.data_desfecho || "",
+      });
+    }).catch(() => setError("Não foi possível carregar a ficha."));
+  }, [fichaId]);
+
+  const desfechoCompleto = form?.classificacaoFinal && form?.destino;
+  const desfechoParcial = form && !desfechoCompleto && (form.classificacaoFinal || form.destino);
+
+  async function handleSave() {
+    setError("");
+    if (desfechoParcial) {
+      setError("Para encerrar o caso, selecione a classificação final E o destino — ou limpe ambos para salvar só os horários.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const payload = {
+        horaPrescricao: form.horaPrescricao || null,
+        horaAntibiotico: form.horaAntibiotico || null,
+        classificacao: form.classificacao,
+      };
+      if (desfechoCompleto) {
+        payload.desfecho = {
+          classificacaoFinal: form.classificacaoFinal,
+          destino: form.destino,
+          indicacaoAdequada: form.indicacaoAdequada,
+          focoConfirmado: form.focoConfirmado,
+          culturasColhidas: form.culturasColhidas,
+          culturaPositiva: form.culturaPositiva,
+          dataDesfecho: form.dataDesfecho || null,
+        };
+      }
+      await api.updateFicha(fichaId, payload);
+      onSaved();
+    } catch (err) {
+      setError(err.message);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="modal-overlay" style={{ position: "fixed", inset: 0, background: "rgba(15,42,51,0.5)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, zIndex: 60 }} onClick={onClose}>
+      <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, maxWidth: 620, width: "100%", maxHeight: "88vh", overflowY: "auto", padding: 24 }}>
+        {!ficha || !form ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <Skeleton h={22} w="55%" /><Skeleton h={70} /><Skeleton h={90} /><Skeleton h={70} />
+          </div>
+        ) : (
+          <>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
+              <div>
+                <h3 style={{ margin: 0, color: C.ink }}>{ficha.paciente_nome}</h3>
+                <div style={{ fontSize: 13, color: C.inkSoft }}>
+                  Nº {ficha.numero_atendimento} · aberto em {ficha.data_atendimento?.split("-").reverse().join("/")} às {ficha.hora_atendimento?.slice(0, 5)}
+                </div>
+              </div>
+              <button onClick={onClose} aria-label="Fechar" style={{ background: "none", border: "none", cursor: "pointer", color: C.inkSoft }}><X size={20} /></button>
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <Badge tone={(STATUS_META[ficha.status] || {}).tone || "gray"}>{(STATUS_META[ficha.status] || {}).label || ficha.status}</Badge>
+            </div>
+
+            <div style={{ borderTop: `1px solid ${C.line}`, paddingTop: 14 }}>
+              <SectionTitle icon={<Syringe size={16} />} title="Tempos do antibiótico" />
+              <TemposAtb
+                horaAbertura={ficha.hora_atendimento?.slice(0, 5)}
+                horaPrescricao={form.horaPrescricao}
+                horaAntibiotico={form.horaAntibiotico}
+                onChange={(patch) => setForm({ ...form, ...patch })}
+              />
+            </div>
+
+            <div style={{ borderTop: `1px solid ${C.line}`, paddingTop: 14, marginTop: 16 }}>
+              <SectionTitle icon={<HeartPulse size={16} />} title="Classificação na abertura" />
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {CLASSIF.map((c) => {
+                  const on = form.classificacao === c.id;
+                  return (
+                    <button key={c.id} type="button" className="chip" onClick={() => setForm({ ...form, classificacao: on ? null : c.id })}
+                      style={{ padding: "7px 13px", borderRadius: 999, fontSize: 12.5, fontWeight: 700, cursor: "pointer", border: `1.5px solid ${on ? C.teal : C.line}`, background: on ? C.teal : "#fff", color: on ? "#fff" : C.ink }}>
+                      {c.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div style={{ borderTop: `1px solid ${C.line}`, paddingTop: 14, marginTop: 16 }}>
+              <SectionTitle icon={<CheckCircle2 size={16} />} title="Desfecho e revisão do caso" />
+              <Field label="Classificação final (era mesmo sepse?)">
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {CLASSIF_FINAL.map((c) => {
+                    const on = form.classificacaoFinal === c.id;
+                    return (
+                      <button key={c.id} type="button" className="chip" onClick={() => setForm({ ...form, classificacaoFinal: on ? null : c.id })}
+                        style={{ padding: "7px 13px", borderRadius: 999, fontSize: 12.5, fontWeight: 700, cursor: "pointer", border: `1.5px solid ${on ? C.teal : C.line}`, background: on ? C.teal : "#fff", color: on ? "#fff" : C.ink }}>
+                        {c.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </Field>
+              <div style={{ marginTop: 12 }}>
+                <Field label="Destino do paciente">
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {DESTINOS.map((d) => {
+                      const on = form.destino === d.id;
+                      return (
+                        <button key={d.id} type="button" className="chip" onClick={() => setForm({ ...form, destino: on ? null : d.id })}
+                          style={{ padding: "7px 13px", borderRadius: 999, fontSize: 12.5, fontWeight: 700, cursor: "pointer", border: `1.5px solid ${on ? C.teal : C.line}`, background: on ? C.teal : "#fff", color: on ? "#fff" : C.ink }}>
+                          {d.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </Field>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px,1fr))", gap: 10, marginTop: 14 }}>
+                <SimNao label="Indicação de abertura adequada?" value={form.indicacaoAdequada} onChange={(v) => setForm({ ...form, indicacaoAdequada: v })} />
+                <SimNao label="Foco de infecção confirmado?" value={form.focoConfirmado} onChange={(v) => setForm({ ...form, focoConfirmado: v })} />
+                <SimNao label="Culturas colhidas?" value={form.culturasColhidas} onChange={(v) => setForm({ ...form, culturasColhidas: v })} />
+                <SimNao label="Cultura positiva?" value={form.culturaPositiva} onChange={(v) => setForm({ ...form, culturaPositiva: v })} />
+              </div>
+              <div style={{ marginTop: 14, maxWidth: 220 }}>
+                <Field label="Data do desfecho">
+                  <input type="date" value={form.dataDesfecho} onChange={(e) => setForm({ ...form, dataDesfecho: e.target.value })} style={inputStyle} />
+                </Field>
+              </div>
+            </div>
+
+            {error && <ErrorLine text={error} />}
+            <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
+              <button onClick={onClose} className="btn-secondary" style={{ ...secondaryBtn, flex: 1, justifyContent: "center" }}>Cancelar</button>
+              <button onClick={handleSave} disabled={busy} className="btn-primary" style={{ ...primaryBtn, flex: 2, marginTop: 0 }}>
+                {busy ? "Salvando..." : desfechoCompleto ? "Salvar e encerrar caso" : "Salvar lançamentos"}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SimNao({ label, value, onChange }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, border: `1px solid ${C.line}`, borderRadius: 10, padding: "9px 12px" }}>
+      <span style={{ fontSize: 12.5, color: C.ink, fontWeight: 600 }}>{label}</span>
+      <div style={{ display: "flex", gap: 4 }}>
+        {[{ v: true, l: "Sim" }, { v: false, l: "Não" }].map(({ v, l }) => {
+          const on = value === v;
+          return (
+            <button key={l} type="button" onClick={() => onChange(on ? null : v)}
+              style={{
+                padding: "4px 12px", borderRadius: 999, fontSize: 12, fontWeight: 700, cursor: "pointer",
+                border: `1.5px solid ${on ? C.teal : C.line}`, background: on ? C.teal : "#fff", color: on ? "#fff" : C.inkSoft,
+              }}>
+              {l}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 /* ---------------------------------------------------------------------- */
 /*  Histórico de fichas                                                    */
@@ -770,10 +1210,19 @@ function HistoricoTab({ refreshKey, onNovaFicha }) {
         Hora: f.hora_atendimento?.slice(0, 5),
         Paciente: f.paciente_nome,
         "Nº Atendimento": f.numero_atendimento,
+        Status: STATUS_META[f.status]?.label || "",
         Classificação: f.classificacao ? CLASSIF_LABEL[f.classificacao] : "",
-        "Hora ATB": f.hora_administracao_atb?.slice(0, 5) || "",
+        "Hora prescrição": f.hora_prescricao_atb?.slice(0, 5) || "",
+        "Hora administração": f.hora_administracao_atb?.slice(0, 5) || "",
         "Porta-ATB (min)": f.porta_atb_min ?? "",
         "Dentro da meta 1h": f.porta_atb_min == null ? "" : f.porta_atb_min <= META_MIN ? "Sim" : "Não",
+        "Classificação final": f.classificacao_final ? CLASSIF_FINAL_LABEL[f.classificacao_final] : "",
+        "Indicação adequada": f.indicacao_adequada == null ? "" : f.indicacao_adequada ? "Sim" : "Não",
+        "Foco confirmado": f.foco_confirmado == null ? "" : f.foco_confirmado ? "Sim" : "Não",
+        "Culturas colhidas": f.culturas_colhidas == null ? "" : f.culturas_colhidas ? "Sim" : "Não",
+        "Cultura positiva": f.cultura_positiva == null ? "" : f.cultura_positiva ? "Sim" : "Não",
+        Destino: f.destino ? DESTINO_LABEL[f.destino] : "",
+        "Data desfecho": f.data_desfecho?.split("-").reverse().join("/") || "",
         "Critérios SIRS/Sepse": f.total_criterios,
         "Detalhe critérios": f.criterios_detalhe || "",
         "Foco de infecção": f.focos || "",
@@ -784,9 +1233,10 @@ function HistoricoTab({ refreshKey, onNovaFicha }) {
       }));
       const ws = XLSX.utils.json_to_sheet(sheetRows);
       ws["!cols"] = [
-        { wch: 11 }, { wch: 7 }, { wch: 26 }, { wch: 14 }, { wch: 15 }, { wch: 9 },
-        { wch: 14 }, { wch: 16 }, { wch: 10 },
-        { wch: 50 }, { wch: 28 }, { wch: 30 }, { wch: 22 }, { wch: 10 }, { wch: 19 },
+        { wch: 11 }, { wch: 7 }, { wch: 26 }, { wch: 14 }, { wch: 18 }, { wch: 15 },
+        { wch: 9 }, { wch: 9 }, { wch: 14 }, { wch: 16 },
+        { wch: 18 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 13 }, { wch: 12 },
+        { wch: 10 }, { wch: 50 }, { wch: 28 }, { wch: 30 }, { wch: 22 }, { wch: 10 }, { wch: 19 },
       ];
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Fichas Sepse");
@@ -819,7 +1269,7 @@ function HistoricoTab({ refreshKey, onNovaFicha }) {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead>
               <tr style={{ background: "#eef4f4", textAlign: "left" }}>
-                {["Data", "Hora", "Paciente", "Nº Atend.", "Classificação", "Critérios", "Porta-ATB", "Médico", ""].map((h) => (
+                {["Data", "Hora", "Paciente", "Nº Atend.", "Status", "Classificação", "Critérios", "Porta-ATB", "Médico", ""].map((h) => (
                   <th key={h} style={{ padding: "10px 14px", fontWeight: 700, color: C.tealDark, whiteSpace: "nowrap" }}>{h}</th>
                 ))}
               </tr>
@@ -831,6 +1281,7 @@ function HistoricoTab({ refreshKey, onNovaFicha }) {
                   <td style={td}>{f.hora_atendimento?.slice(0, 5)}</td>
                   <td style={{ ...td, fontWeight: 600 }}>{f.paciente_nome}</td>
                   <td style={td}>{f.numero_atendimento}</td>
+                  <td style={td}>{STATUS_META[f.status] ? <Badge tone={STATUS_META[f.status].tone}>{STATUS_META[f.status].label}</Badge> : <span style={{ color: C.inkSoft }}>—</span>}</td>
                   <td style={td}>{f.classificacao ? <Badge tone={f.classificacao === "choque_septico" ? "red" : f.classificacao === "sepse" ? "amber" : "teal"}>{CLASSIF_LABEL[f.classificacao]}</Badge> : <span style={{ color: C.inkSoft }}>—</span>}</td>
                   <td style={td}><Badge tone={f.total_criterios >= 2 ? "red" : f.total_criterios === 1 ? "amber" : "teal"}>{f.total_criterios}</Badge></td>
                   <td style={td}><PortaAtbBadge min={f.porta_atb_min} /></td>
@@ -841,12 +1292,12 @@ function HistoricoTab({ refreshKey, onNovaFicha }) {
                 </tr>
               ))}
               {!loading && loadError && (
-                <tr><td colSpan={9}>
+                <tr><td colSpan={10}>
                   <EmptyState icon={<AlertTriangle size={44} />} title="Não foi possível carregar as fichas" subtitle="Verifique a conexão e tente novamente." />
                 </td></tr>
               )}
               {!loading && !loadError && !result.items.length && (
-                <tr><td colSpan={9}>
+                <tr><td colSpan={10}>
                   <EmptyState icon={<Inbox size={44} />} title="Nenhuma ficha encontrada" subtitle="Ajuste os filtros ou registre uma nova ficha na aba ao lado." />
                   {onNovaFicha && (
                     <div style={{ textAlign: "center", paddingBottom: 24 }}>
@@ -857,7 +1308,7 @@ function HistoricoTab({ refreshKey, onNovaFicha }) {
               )}
               {loading && [...Array(5)].map((_, i) => (
                 <tr key={i} style={{ borderTop: `1px solid ${C.line}` }}>
-                  {[...Array(9)].map((_, j) => <td key={j} style={td}><Skeleton h={14} /></td>)}
+                  {[...Array(10)].map((_, j) => <td key={j} style={td}><Skeleton h={14} /></td>)}
                 </tr>
               ))}
             </tbody>
@@ -1017,6 +1468,10 @@ function PainelTab({ refreshKey }) {
   const byFoco = data?.byFoco || [];
   const byAtb = data?.byAtb || [];
   const byClassif = (data?.byClassif || []).map((c) => ({ ...c, label: CLASSIF_LABEL[c.name] || c.name }));
+  const desfechos = data?.desfechos;
+  const byStatus = data?.byStatus || [];
+  const byClassifFinal = (desfechos?.byClassifFinal || []).map((c) => ({ ...c, label: CLASSIF_FINAL_LABEL[c.name] || c.name }));
+  const byDestino = (desfechos?.byDestino || []).map((d) => ({ ...d, label: DESTINO_LABEL[d.name] || d.name }));
 
   // delta em pontos percentuais vs mês anterior (tendência mensal)
   const meses = byMonth.filter((m) => m.pctMeta != null);
@@ -1189,6 +1644,80 @@ function PainelTab({ refreshKey }) {
         </div>
       </div>
       )}
+
+      {/* Desfechos e fila de acompanhamento */}
+      {!loadError && (
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px,1fr))", gap: 16 }}>
+        <Card className="anim-card">
+          <SectionTitle icon={<CheckCircle2 size={16} />} title="Desfecho — era mesmo sepse?" />
+          {loading ? <Skeleton h={200} /> : desfechos?.encerrados ? (
+            <>
+              <div style={{ display: "flex", gap: 26, flexWrap: "wrap", marginBottom: 16 }}>
+                <Stat label="Casos encerrados" value={desfechos.encerrados} />
+                <Stat label="Taxa de confirmação" value={desfechos.taxaConfirmacao != null ? `${desfechos.taxaConfirmacao}%` : "—"} sub="sepse ou choque confirmados" />
+                <Stat label="Mortalidade" value={desfechos.mortalidade != null ? `${desfechos.mortalidade}%` : "—"} tone={desfechos.mortalidade > 20 ? "red" : undefined} sub="dos casos encerrados" />
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {byClassifFinal.map((c) => {
+                  const total = byClassifFinal.reduce((s, x) => s + x.value, 0);
+                  const pct = Math.round((100 * c.value) / total);
+                  const cor = { sepse_confirmada: C.teal, choque_septico: C.red, infeccao_sem_sepse: C.amber, descartado: "#9db3ba" }[c.name] || C.inkSoft;
+                  return (
+                    <div key={c.name} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <span style={{ width: 10, height: 10, borderRadius: 3, background: cor, flexShrink: 0 }} />
+                      <span style={{ fontSize: 12.5, width: 140, color: C.ink }}>{c.label}</span>
+                      <div style={{ flex: 1, height: 16, background: "#eef3f4", borderRadius: 4, overflow: "hidden" }}>
+                        <div style={{ width: `${pct}%`, height: "100%", background: cor, borderRadius: 4, transition: "width .4s" }} />
+                      </div>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: C.inkSoft, width: 62, textAlign: "right" }}>{c.value} · {pct}%</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          ) : <EmptyState icon={<Inbox size={40} />} title="Nenhum caso encerrado no período" subtitle="Os desfechos aparecem aqui conforme os casos são revisados e encerrados." />}
+        </Card>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <Card className="anim-card">
+            <SectionTitle icon={<HeartPulse size={16} />} title="Fila de acompanhamento no período" />
+            {loading ? <Skeleton h={70} /> : byStatus.length ? (
+              <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
+                {["pendente_atb", "aguardando_desfecho", "encerrado"].map((s) => {
+                  const item = byStatus.find((x) => x.name === s);
+                  const meta = STATUS_META[s];
+                  return (
+                    <div key={s} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <span style={{ width: 12, height: 12, borderRadius: 999, background: STATUS_COLOR[s] }} />
+                      <div>
+                        <div style={{ fontSize: 24, fontWeight: 800, color: STATUS_COLOR[s], lineHeight: 1 }}>{item?.value ?? 0}</div>
+                        <div style={{ fontSize: 11.5, color: C.inkSoft, fontWeight: 600, marginTop: 2 }}>{meta.label}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : <EmptyState icon={<Inbox size={40} />} title="Sem dados" />}
+          </Card>
+
+          <Card className="anim-card" style={{ flex: 1 }}>
+            <SectionTitle icon={<Users size={16} />} title="Destino dos pacientes" />
+            {loading ? <Skeleton h={160} /> : byDestino.length ? (
+              <ResponsiveContainer width="100%" height={Math.max(150, byDestino.length * 30)}>
+                <BarChart data={byDestino} layout="vertical" margin={{ left: 10, right: 30 }}>
+                  <XAxis type="number" hide />
+                  <YAxis type="category" dataKey="label" width={100} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
+                  <Tooltip formatter={(v) => [v, "Pacientes"]} />
+                  <Bar dataKey="value" fill={C.teal} radius={[0, 4, 4, 0]} maxBarSize={18}>
+                    <LabelList dataKey="value" position="right" style={{ fontSize: 11, fontWeight: 700, fill: C.tealDark }} />
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            ) : <EmptyState icon={<Inbox size={40} />} title="Sem desfechos no período" />}
+          </Card>
+        </div>
+      </div>
+      )}
     </div>
   );
 }
@@ -1332,7 +1861,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [needsBootstrap, setNeedsBootstrap] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
-  const [tab, setTab] = useState("nova");
+  const [tab, setTab] = useState("acompanhamento");
   const [summary, setSummary] = useState({ todayCount: 0, monthCount: 0, totalFichas: 0, activeMedicos: 0 });
   const [refreshKey, setRefreshKey] = useState(0);
   const [catalogos, setCatalogos] = useState({
@@ -1429,6 +1958,7 @@ export default function App() {
   const initials = currentUser.name.split(" ").map((p) => p[0]).filter(Boolean).slice(0, 2).join("").toUpperCase();
 
   const TABS = [
+    { id: "acompanhamento", label: "Acompanhamento", icon: <HeartPulse size={16} /> },
     { id: "nova", label: "Nova ficha", icon: <ClipboardList size={16} /> },
     { id: "historico", label: "Histórico", icon: <Search size={16} /> },
     { id: "painel", label: "Painel analítico", icon: <BarChart3 size={16} /> },
@@ -1482,6 +2012,7 @@ export default function App() {
       </div>
 
       <div style={{ maxWidth: 1100, margin: "0 auto", padding: "0 20px 40px" }}>
+        {tab === "acompanhamento" && <AcompanhamentoTab refreshKey={refreshKey} onNovaFicha={() => setTab("nova")} />}
         {tab === "nova" && <NovaFichaTab user={currentUser} catalogos={catalogos} onSaved={handleFichaSaved} />}
         {tab === "historico" && <HistoricoTab refreshKey={refreshKey} onNovaFicha={() => setTab("nova")} />}
         {tab === "painel" && <PainelTab refreshKey={refreshKey} />}
