@@ -25,14 +25,28 @@ jobs:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
           SSH_HOST: ${{ secrets.SSH_HOST }}
           SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
           printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -t ed25519 "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          # Host key FIXADA via secret (sem ssh-keyscan/TOFU): mais seguro e sem a
+          # flakiness do keyscan, que era a causa das falhas intermitentes de deploy.
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
 
-          # O authorized_keys do servidor forca a execucao de /opt/protocolo-sepse/deploy.sh
-          # independente do comando enviado abaixo, entao o escopo desta chave e fixo.
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes "$SSH_USER@$SSH_HOST" "deploy"
+          # O authorized_keys do servidor forca /opt/protocolo-sepse/deploy.sh,
+          # entao o escopo desta chave e fixo. Retry cobre blips runner->VPS.
+          n=0
+          until [ "$n" -ge 3 ]; do
+            if ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "$SSH_USER@$SSH_HOST" "deploy"; then
+              exit 0
+            fi
+            n=$((n + 1))
+            echo "Tentativa de deploy $n falhou; nova tentativa em instantes..."
+            sleep $((n * 10))
+          done
+          echo "Deploy falhou apos 3 tentativas."
+          exit 1

@@ -1,0 +1,3 @@
+# Scripts shell SEMPRE com LF, mesmo commitados de Windows — CRLF quebra o
+# shebang e o parsing no servidor Linux.
+*.sh text eol=lf
