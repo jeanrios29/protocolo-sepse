@@ -289,8 +289,8 @@ function LoginScreen({ needsBootstrap, onAuthenticated }) {
             </form>
           ) : (
             <form onSubmit={handleLogin}>
-              <label style={labelStyle}>CRM</label>
-              <input value={crm} onChange={(e) => setCrm(e.target.value)} style={inputStyle} placeholder="Ex: 32.394" autoFocus />
+              <label style={labelStyle}>CRM ou e-mail</label>
+              <input value={crm} onChange={(e) => setCrm(e.target.value)} style={inputStyle} placeholder="Ex: 32.394 ou nome@hospital.com" autoComplete="username" autoFocus />
               <label style={labelStyle}>Senha</label>
               <div style={{ position: "relative" }}>
                 <input type={showPw ? "text" : "password"} value={senha} onChange={(e) => setSenha(e.target.value)} style={{ ...inputStyle, paddingRight: 40 }} />

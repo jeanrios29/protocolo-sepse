@@ -4,6 +4,18 @@ import { pool } from "./db.js";
 
 const BCRYPT_ROUNDS = 12;
 
+// Normaliza um CRM para comparação tolerante a formatação: mantém só os
+// dígitos. Assim "32.394", "32394", "32-394" e "32 394" viram "32394" e são
+// tratados como o mesmo CRM (evita a pegadinha do ponto no login).
+export function normalizarCrm(valor) {
+  return String(valor || "").replace(/\D/g, "");
+}
+
+// Heurística simples: um identificador de login é e-mail se contém "@".
+export function pareceEmail(valor) {
+  return String(valor || "").includes("@");
+}
+
 export function hashPassword(plain) {
   return bcrypt.hash(plain, BCRYPT_ROUNDS);
 }
