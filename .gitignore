@@ -3,3 +3,6 @@ dist/
 .env
 *.env
 npm-debug.log*
+
+# Ambiente local do Claude Code
+.claude/

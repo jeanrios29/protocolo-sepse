@@ -1,4 +1,4 @@
-import "dotenv/config";
+import { config } from "./config.js";
 import express from "express";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
@@ -35,13 +35,11 @@ app.get("/api/health", (req, res) => res.json({ ok: true }));
 
 app.use((req, res) => res.status(404).json({ error: "Rota não encontrada." }));
 
-// eslint-disable-next-line no-unused-vars
-app.use((err, req, res, next) => {
+app.use((err, req, res, _next) => {
   console.error(err);
   res.status(500).json({ error: "Erro interno do servidor." });
 });
 
-const port = process.env.PORT || 4000;
-app.listen(port, "127.0.0.1", () => {
-  console.log(`Protocolo Sepse backend rodando em http://127.0.0.1:${port}`);
+app.listen(config.port, "127.0.0.1", () => {
+  console.log(`Protocolo Sepse backend rodando em http://127.0.0.1:${config.port}`);
 });

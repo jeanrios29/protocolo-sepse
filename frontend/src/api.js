@@ -45,6 +45,7 @@ export const api = {
   focos: () => request("/fichas/focos"),
   antibioticos: () => request("/fichas/antibioticos"),
   createFicha: (payload) => request("/fichas", { method: "POST", body: payload }),
+  updateFicha: (id, payload) => request(`/fichas/${id}`, { method: "PATCH", body: payload }),
   listFichas: (params) => request(`/fichas?${new URLSearchParams(params)}`),
   fichaDetail: (id) => request(`/fichas/${id}`),
   exportFichas: (params) => request(`/fichas/export/data?${new URLSearchParams(params)}`),

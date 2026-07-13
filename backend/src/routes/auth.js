@@ -5,8 +5,9 @@ import { hashPassword, verifyPassword, signToken, requireAuth } from "../auth.js
 
 const router = Router();
 
-const MASTER_CRM = "32.394";
-const MASTER_NAME = "Jean Rios Novaes Silva";
+// Identidade do usuário master definida por ambiente (não versionada em código).
+const MASTER_CRM = process.env.MASTER_CRM || "32.394";
+const MASTER_NAME = process.env.MASTER_NAME || "Administrador";
 
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -14,6 +15,16 @@ const loginLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "Muitas tentativas de login. Tente novamente em alguns minutos." },
+});
+
+// Bootstrap é público e só vale enquanto não há usuários — protege contra
+// tentativas repetidas enquanto a janela de inicialização está aberta.
+const bootstrapLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Muitas tentativas. Tente novamente em alguns minutos." },
 });
 
 async function logAudit(client, { medicoId, acao, entidade, entidadeId, detalhes, ip }) {
@@ -33,28 +44,37 @@ router.get("/status", async (req, res, next) => {
   }
 });
 
-router.post("/bootstrap", async (req, res, next) => {
+router.post("/bootstrap", bootstrapLimiter, async (req, res, next) => {
   try {
     const { password } = req.body || {};
     if (!password || password.length < 6) {
       return res.status(400).json({ error: "A senha precisa ter ao menos 6 caracteres." });
     }
-    const { rows: existing } = await pool.query("SELECT count(*)::int AS total FROM medicos");
-    if (existing[0].total > 0) {
-      return res.status(409).json({ error: "O sistema já foi inicializado." });
-    }
     const hash = await hashPassword(password);
+    // Inserção condicional atômica: só cria o master se a tabela estiver vazia.
+    // Evita a corrida (TOCTOU) entre checar count(*) e inserir — dois pedidos
+    // simultâneos não conseguem criar dois masters.
     const { rows } = await pool.query(
       `INSERT INTO medicos (nome, crm, email, password_hash, role, active)
-       VALUES ($1, $2, '', $3, 'master', true)
+       SELECT $1, $2, '', $3, 'master', true
+       WHERE NOT EXISTS (SELECT 1 FROM medicos)
        RETURNING id, nome, crm, role`,
       [MASTER_NAME, MASTER_CRM, hash]
     );
+    if (!rows[0]) {
+      return res.status(409).json({ error: "O sistema já foi inicializado." });
+    }
     const master = rows[0];
     await logAudit(pool, { medicoId: master.id, acao: "bootstrap_master", ip: req.ip });
     const token = signToken({ id: master.id, crm: master.crm, role: master.role, nome: master.nome });
     res.json({ token, user: { name: master.nome, crm: master.crm, role: master.role } });
   } catch (err) {
+    // Corrida extrema: dois pedidos passam pelo WHERE NOT EXISTS antes de
+    // qualquer commit; o UNIQUE do CRM barra o segundo (23505). Responde 409
+    // limpo em vez de 500 — a invariante "um único master" é mantida pelo banco.
+    if (err.code === "23505") {
+      return res.status(409).json({ error: "O sistema já foi inicializado." });
+    }
     next(err);
   }
 });

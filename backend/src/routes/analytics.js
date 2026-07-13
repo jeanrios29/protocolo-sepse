@@ -46,12 +46,96 @@ router.get("/painel", async (req, res, next) => {
       [de, ate]
     );
 
-    const [byDay, byFoco, byAtb, summary] = await Promise.all([byDayQ, byFocoQ, byAtbQ, summaryQ]);
+    // KPI porta-antibiotico no periodo (meta institucional: <= 60 min)
+    const kpiQ = pool.query(
+      `SELECT count(*) FILTER (WHERE porta_atb_min IS NOT NULL)::int              AS com_atb,
+              count(*) FILTER (WHERE porta_atb_min <= 60)::int                    AS dentro_meta,
+              percentile_cont(0.5) WITHIN GROUP (ORDER BY porta_atb_min)          AS mediana_min
+       FROM vw_atendimentos_resumo
+       WHERE data_atendimento BETWEEN $1 AND $2 AND porta_atb_min IS NOT NULL`,
+      [de, ate]
+    );
 
+    // Tendencia mensal (ultimos 6 meses, independente do filtro de periodo)
+    const byMonthQ = pool.query(
+      `SELECT to_char(date_trunc('month', data_atendimento), 'YYYY-MM')           AS mes,
+              count(*)::int                                                       AS total,
+              count(*) FILTER (WHERE porta_atb_min IS NOT NULL)::int              AS com_atb,
+              count(*) FILTER (WHERE porta_atb_min <= 60)::int                    AS dentro_meta
+       FROM vw_atendimentos_resumo
+       WHERE data_atendimento >= date_trunc('month', now()) - interval '5 months'
+       GROUP BY 1 ORDER BY 1`
+    );
+
+    // Distribuicao por classificacao no periodo
+    const byClassifQ = pool.query(
+      `SELECT COALESCE(classificacao, 'nao_classificado') AS name, count(*)::int AS value
+       FROM vw_atendimentos_resumo
+       WHERE data_atendimento BETWEEN $1 AND $2
+       GROUP BY 1 ORDER BY value DESC`,
+      [de, ate]
+    );
+
+    // Status dos casos no periodo (fila de acompanhamento)
+    const statusQ = pool.query(
+      `SELECT status AS name, count(*)::int AS value
+       FROM vw_atendimentos_resumo
+       WHERE data_atendimento BETWEEN $1 AND $2
+       GROUP BY 1`,
+      [de, ate]
+    );
+
+    // Desfechos: classificacao final e destino dos casos encerrados no periodo
+    const byClassifFinalQ = pool.query(
+      `SELECT classificacao_final AS name, count(*)::int AS value
+       FROM vw_atendimentos_resumo
+       WHERE data_atendimento BETWEEN $1 AND $2 AND classificacao_final IS NOT NULL
+       GROUP BY 1 ORDER BY value DESC`,
+      [de, ate]
+    );
+    const byDestinoQ = pool.query(
+      `SELECT destino AS name, count(*)::int AS value
+       FROM vw_atendimentos_resumo
+       WHERE data_atendimento BETWEEN $1 AND $2 AND destino IS NOT NULL
+       GROUP BY 1 ORDER BY value DESC`,
+      [de, ate]
+    );
+
+    const [byDay, byFoco, byAtb, summary, kpi, byMonth, byClassif, byStatus, byClassifFinal, byDestino] = await Promise.all([
+      byDayQ, byFocoQ, byAtbQ, summaryQ, kpiQ, byMonthQ, byClassifQ, statusQ, byClassifFinalQ, byDestinoQ,
+    ]);
+
+    const encerrados = byClassifFinal.rows.reduce((s, r) => s + r.value, 0);
+    const confirmados = byClassifFinal.rows
+      .filter((r) => r.name === "sepse_confirmada" || r.name === "choque_septico")
+      .reduce((s, r) => s + r.value, 0);
+    const obitos = byDestino.rows.find((r) => r.name === "obito")?.value ?? 0;
+
+    const k = kpi.rows[0];
     res.json({
       periodoCount: summary.rows[0].periodo_count,
       avgCriteria: Number(summary.rows[0].avg_criteria).toFixed(1),
       focosDistintos: byFoco.rows.length,
+      kpi: {
+        comAtb: k.com_atb,
+        dentroMeta: k.dentro_meta,
+        pctDentroMeta: k.com_atb ? Math.round((100 * k.dentro_meta) / k.com_atb) : null,
+        medianaMin: k.mediana_min == null ? null : Math.round(Number(k.mediana_min)),
+      },
+      byMonth: byMonth.rows.map((r) => ({
+        mes: r.mes,
+        total: r.total,
+        pctMeta: r.com_atb ? Math.round((100 * r.dentro_meta) / r.com_atb) : null,
+      })),
+      byClassif: byClassif.rows,
+      byStatus: byStatus.rows,
+      desfechos: {
+        encerrados,
+        taxaConfirmacao: encerrados ? Math.round((100 * confirmados) / encerrados) : null,
+        mortalidade: encerrados ? Math.round((100 * obitos) / encerrados) : null,
+        byClassifFinal: byClassifFinal.rows,
+        byDestino: byDestino.rows,
+      },
       byDay: byDay.rows.map((r) => ({
         data: r.data.split("-").reverse().join("/"),
         total: r.total,
