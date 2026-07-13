@@ -8,7 +8,7 @@ import {
   Activity, Stethoscope, ClipboardList, BarChart3, Users, LogOut,
   Plus, Search, Download, ShieldCheck, UserPlus, Eye, EyeOff, X,
   ChevronLeft, ChevronRight, AlertTriangle, CheckCircle2, Lock,
-  Timer, Check, Syringe, HeartPulse, CalendarRange, Inbox, TrendingUp,
+  Timer, Check, Syringe, HeartPulse, CalendarRange, Inbox, TrendingUp, KeyRound,
 } from "lucide-react";
 import { api, getToken, setToken } from "./api.js";
 
@@ -1896,6 +1896,66 @@ function ResetPasswordModal({ crm, onClose, onConfirm }) {
 }
 
 /* ---------------------------------------------------------------------- */
+/*  Troca da própria senha (usuário autenticado)                           */
+/* ---------------------------------------------------------------------- */
+
+function ChangePasswordModal({ onClose, onChanged }) {
+  const [atual, setAtual] = useState("");
+  const [nova, setNova] = useState("");
+  const [nova2, setNova2] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+
+  async function handleSave() {
+    setError("");
+    if (!atual) return setError("Informe a senha atual.");
+    if (nova.trim().length < 6) return setError("A nova senha precisa ter ao menos 6 caracteres.");
+    if (nova !== nova2) return setError("As senhas não coincidem.");
+    if (nova === atual) return setError("A nova senha deve ser diferente da atual.");
+    setBusy(true);
+    try {
+      const { token } = await api.changePassword(atual, nova.trim());
+      if (token) setToken(token); // o token antigo foi revogado no backend
+      setDone(true);
+      setTimeout(() => { onClose(); onChanged?.(); }, 1100);
+    } catch (err) {
+      setError(err.message);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="modal-overlay" style={{ position: "fixed", inset: 0, background: "rgba(15,42,51,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, zIndex: 60 }} onClick={onClose}>
+      <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, maxWidth: 380, width: "100%", padding: 22 }}>
+        <h3 style={{ marginTop: 0, color: C.ink, fontSize: 15, display: "flex", alignItems: "center", gap: 8 }}>
+          <KeyRound size={17} /> Trocar minha senha
+        </h3>
+        {done ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, color: C.green, background: C.greenBg, borderRadius: 9, padding: "10px 12px", fontSize: 13, fontWeight: 600, marginTop: 10 }}>
+            <CheckCircle2 size={16} /> Senha alterada com sucesso.
+          </div>
+        ) : (
+          <>
+            <label style={{ ...labelStyle, marginTop: 4 }}>Senha atual</label>
+            <input type="password" value={atual} onChange={(e) => setAtual(e.target.value)} style={inputStyle} autoFocus />
+            <label style={labelStyle}>Nova senha</label>
+            <input type="password" value={nova} onChange={(e) => setNova(e.target.value)} style={inputStyle} placeholder="Mínimo 6 caracteres" />
+            <label style={labelStyle}>Confirmar nova senha</label>
+            <input type="password" value={nova2} onChange={(e) => setNova2(e.target.value)} style={inputStyle} onKeyDown={(e) => e.key === "Enter" && handleSave()} />
+            {error && <ErrorLine text={error} />}
+            <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
+              <button onClick={onClose} className="btn-secondary" style={{ ...secondaryBtn, flex: 1, justifyContent: "center" }}>Cancelar</button>
+              <button onClick={handleSave} disabled={busy} className="btn-primary" style={{ ...primaryBtn, flex: 1, marginTop: 0 }}>{busy ? "Salvando..." : "Salvar"}</button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------------- */
 /*  App raiz                                                               */
 /* ---------------------------------------------------------------------- */
 
@@ -1906,6 +1966,7 @@ export default function App() {
   const [tab, setTab] = useState("acompanhamento");
   const [summary, setSummary] = useState({ todayCount: 0, monthCount: 0, totalFichas: 0, activeMedicos: 0 });
   const [refreshKey, setRefreshKey] = useState(0);
+  const [showChangePw, setShowChangePw] = useState(false);
   const [catalogos, setCatalogos] = useState({
     criterios: SIRS_ITEMS_FALLBACK,
     focos: FOCOS_FALLBACK,
@@ -2029,6 +2090,9 @@ export default function App() {
             <div style={{ width: 36, height: 36, borderRadius: 999, background: "rgba(255,255,255,0.16)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, letterSpacing: 0.5 }}>
               {initials}
             </div>
+            <button onClick={() => setShowChangePw(true)} aria-label="Trocar minha senha" style={{ background: "rgba(255,255,255,0.12)", border: "none", color: "#fff", borderRadius: 8, padding: 8, cursor: "pointer", display: "flex" }} title="Trocar minha senha">
+              <KeyRound size={16} />
+            </button>
             <button onClick={handleLogout} aria-label="Sair" style={{ background: "rgba(255,255,255,0.12)", border: "none", color: "#fff", borderRadius: 8, padding: 8, cursor: "pointer", display: "flex" }} title="Sair">
               <LogOut size={16} />
             </button>
@@ -2060,6 +2124,8 @@ export default function App() {
         {tab === "painel" && <PainelTab refreshKey={refreshKey} />}
         {tab === "admin" && isMaster && <AdminTab />}
       </div>
+
+      {showChangePw && <ChangePasswordModal onClose={() => setShowChangePw(false)} />}
     </div>
   );
 }

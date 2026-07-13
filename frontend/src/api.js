@@ -40,6 +40,8 @@ export const api = {
   bootstrap: (password) => request("/auth/bootstrap", { method: "POST", body: { password }, auth: false }),
   login: (crm, senha) => request("/auth/login", { method: "POST", body: { crm, senha }, auth: false }),
   me: () => request("/auth/me"),
+  changePassword: (senhaAtual, novaSenha) =>
+    request("/auth/change-password", { method: "POST", body: { senhaAtual, novaSenha } }),
 
   criterios: () => request("/fichas/criterios"),
   focos: () => request("/fichas/focos"),

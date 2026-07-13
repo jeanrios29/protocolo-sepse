@@ -122,4 +122,49 @@ router.get("/me", requireAuth, async (req, res, next) => {
   }
 });
 
+// Troca da própria senha (usuário autenticado). Exige a senha atual — nem o
+// master reseta a própria senha às cegas. Ao trocar, updated_at é bumpado, o
+// que invalida qualquer token antigo (revogação via requireAuth); por isso
+// emitimos um token novo para manter a sessão viva sem novo login.
+router.post("/change-password", requireAuth, async (req, res, next) => {
+  try {
+    const { senhaAtual, novaSenha } = req.body || {};
+    if (!senhaAtual || !novaSenha) {
+      return res.status(400).json({ error: "Informe a senha atual e a nova senha." });
+    }
+    if (novaSenha.length < 6) {
+      return res.status(400).json({ error: "A nova senha precisa ter ao menos 6 caracteres." });
+    }
+    if (novaSenha === senhaAtual) {
+      return res.status(400).json({ error: "A nova senha deve ser diferente da atual." });
+    }
+
+    const { rows } = await pool.query(
+      "SELECT id, password_hash, active FROM medicos WHERE id = $1",
+      [req.user.sub]
+    );
+    const medico = rows[0];
+    if (!medico || !medico.active) return res.status(401).json({ error: "Sessão inválida." });
+
+    const ok = await verifyPassword(senhaAtual, medico.password_hash);
+    if (!ok) {
+      await logAudit(pool, { medicoId: medico.id, acao: "troca_senha_falhou", detalhes: { motivo: "senha_atual_incorreta" }, ip: req.ip });
+      return res.status(400).json({ error: "Senha atual incorreta." });
+    }
+
+    const hash = await hashPassword(novaSenha);
+    await pool.query(
+      "UPDATE medicos SET password_hash = $1, updated_at = now() WHERE id = $2",
+      [hash, medico.id]
+    );
+    await logAudit(pool, { medicoId: medico.id, acao: "troca_senha", ip: req.ip });
+
+    // Token novo (o anterior acabou de ser revogado pelo bump de updated_at).
+    const token = signToken({ id: medico.id, crm: req.user.crm, role: req.user.role, nome: req.user.nome });
+    res.json({ token, ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;
