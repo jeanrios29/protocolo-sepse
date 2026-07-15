@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0a4f4f" />
+    <meta name="description" content="APIMED — Protocolos Médicos" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%230a4f4f'/%3E%3Cpath d='M3.5 12h4l2.5-6 4 12 2.5-6h4' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <title>APIMED — Protocolos Médicos</title>
+    <style>
+      /* Mesma paleta da aplicação (frontend/src/App.jsx):
+         teal #0e6b6b · tealDark #0a4f4f · ink #0f2a33 · tealBg #e3f1f1 */
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        background: linear-gradient(160deg, #0a4f4f, #123840 55%, #0f2a33);
+        font-family: "Inter", system-ui, sans-serif;
+        color: #fff;
+      }
+      .wrap { width: 100%; max-width: 440px; text-align: center; animation: fadeInUp 0.5s ease both; }
+      @keyframes fadeInUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+      .logo {
+        width: 64px; height: 64px; border-radius: 18px;
+        background: rgba(255, 255, 255, 0.1);
+        display: flex; align-items: center; justify-content: center;
+        margin: 0 auto 18px;
+      }
+      h1 { font-size: 26px; font-weight: 800; margin: 0; letter-spacing: 0.3px; }
+      .sub { color: rgba(255, 255, 255, 0.65); font-size: 14px; margin: 8px 0 0; line-height: 1.5; }
+      .card {
+        margin-top: 28px;
+        background: rgba(255, 255, 255, 0.98);
+        border-radius: 16px;
+        padding: 26px 24px;
+        box-shadow: 0 18px 50px rgba(4, 22, 26, 0.45);
+        color: #0f2a33;
+      }
+      .card p { margin: 0 0 18px; font-size: 13.5px; color: #4c6570; line-height: 1.55; }
+      .btn {
+        display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+        width: 100%;
+        background: #0e6b6b; color: #fff;
+        border: none; border-radius: 10px;
+        padding: 13px 20px;
+        font-family: inherit; font-size: 15px; font-weight: 700;
+        text-decoration: none;
+        cursor: pointer;
+        transition: background 0.15s ease, transform 0.15s ease;
+      }
+      .btn:hover { background: #0a4f4f; transform: translateY(-1px); }
+      .btn:focus-visible { outline: 2px solid #0e6b6b; outline-offset: 2px; }
+      .soon {
+        margin-top: 16px;
+        display: inline-flex; align-items: center; gap: 6px;
+        background: #e3f1f1; color: #0a4f4f;
+        font-size: 12px; font-weight: 600;
+        padding: 6px 12px; border-radius: 999px;
+      }
+      footer { margin-top: 26px; font-size: 12px; color: rgba(255, 255, 255, 0.45); }
+    </style>
+  </head>
+  <body>
+    <main class="wrap">
+      <div class="logo" aria-hidden="true">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3.5 12h4l2.5-6 4 12 2.5-6h4" />
+        </svg>
+      </div>
+      <h1>APIMED</h1>
+      <p class="sub">Protocolos médicos</p>
+
+      <div class="card">
+        <p>Ferramentas para execução e monitoramento de protocolos assistenciais.</p>
+        <a class="btn" href="/sepse/">
+          Protocolo Sepse
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M5 12h14M13 6l6 6-6 6" />
+          </svg>
+        </a>
+        <div class="soon">Novos protocolos em breve</div>
+      </div>
+
+      <footer>© APIMED · apimed.com.br</footer>
+    </main>
+  </body>
+</html>

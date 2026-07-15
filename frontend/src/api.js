@@ -1,5 +1,9 @@
 const TOKEN_KEY = "sepse-token";
 
+// A API vive sob o mesmo prefixo do app (/sepse/api em produção e no dev
+// server). Derivar do BASE_URL do Vite evita hardcode do subpath aqui.
+const API_BASE = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/api`;
+
 export function getToken() {
   return localStorage.getItem(TOKEN_KEY);
 }
@@ -14,7 +18,7 @@ async function request(path, { method = "GET", body, auth = true } = {}) {
     const token = getToken();
     if (token) headers.Authorization = `Bearer ${token}`;
   }
-  const res = await fetch(`/api${path}`, {
+  const res = await fetch(`${API_BASE}${path}`, {
     method,
     headers,
     body: body ? JSON.stringify(body) : undefined,
