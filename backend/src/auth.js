@@ -4,14 +4,16 @@ import { pool } from "./db.js";
 
 const BCRYPT_ROUNDS = 12;
 
-// Normaliza um CRM para comparação tolerante a formatação: mantém só os
-// dígitos. Assim "32.394", "32394", "32-394" e "32 394" viram "32394" e são
-// tratados como o mesmo CRM (evita a pegadinha do ponto no login).
+// Normaliza um registro profissional (CRM ou COREN) para comparação tolerante
+// a formatação: mantém só os dígitos. Assim "32.394", "32394", "32-394",
+// "32 394" e "COREN-BA 32.394" viram "32394" e são tratados como o mesmo
+// registro (evita a pegadinha do ponto/prefixo no login).
 export function normalizarCrm(valor) {
   return String(valor || "").replace(/\D/g, "");
 }
 
-// Heurística simples: um identificador de login é e-mail se contém "@".
+// Heurística simples: um identificador de login é e-mail se contém "@";
+// caso contrário é tratado como registro profissional (CRM ou COREN).
 export function pareceEmail(valor) {
   return String(valor || "").includes("@");
 }

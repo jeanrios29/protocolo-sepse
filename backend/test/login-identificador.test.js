@@ -21,7 +21,13 @@ test("normalizarCrm lida com vazio/entrada inválida", () => {
   assert.equal(normalizarCrm("abc"), ""); // sem dígitos → vazio (não identifica ninguém)
 });
 
-test("pareceEmail distingue e-mail de CRM", () => {
+test("normalizarCrm aceita COREN com prefixo/UF (só os dígitos contam)", () => {
+  assert.equal(normalizarCrm("COREN-BA 123.456"), "123456");
+  assert.equal(normalizarCrm("coren 123456"), "123456");
+  assert.equal(normalizarCrm("123.456"), normalizarCrm("COREN-BA 123456"));
+});
+
+test("pareceEmail distingue e-mail de CRM/COREN", () => {
   assert.equal(pareceEmail("nome@hospital.com"), true);
   assert.equal(pareceEmail("32.394"), false);
   assert.equal(pareceEmail("32394"), false);

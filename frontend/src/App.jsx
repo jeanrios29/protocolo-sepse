@@ -289,7 +289,7 @@ function LoginScreen({ needsBootstrap, onAuthenticated }) {
             </form>
           ) : (
             <form onSubmit={handleLogin}>
-              <label style={labelStyle}>CRM ou e-mail</label>
+              <label style={labelStyle}>CRM, COREN ou e-mail</label>
               <input value={crm} onChange={(e) => setCrm(e.target.value)} style={inputStyle} placeholder="Ex: 32.394 ou nome@hospital.com" autoComplete="username" autoFocus />
               <label style={labelStyle}>Senha</label>
               <div style={{ position: "relative" }}>
@@ -301,7 +301,7 @@ function LoginScreen({ needsBootstrap, onAuthenticated }) {
               {error && <ErrorLine text={error} />}
               <button type="submit" disabled={busy} className="btn-primary" style={primaryBtn}>{busy ? "Entrando..." : "Entrar"}</button>
               <p style={{ fontSize: 12, color: C.inkSoft, textAlign: "center", marginTop: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
-                <Lock size={13} /> Acesso restrito a médicos cadastrados pelo administrador
+                <Lock size={13} /> Acesso restrito a profissionais cadastrados pelo administrador
               </p>
             </form>
           )}
@@ -1757,7 +1757,7 @@ function AdminTab() {
   async function addUser(e) {
     e.preventDefault();
     setError("");
-    if (!form.nome.trim() || !form.crm.trim() || !form.senha.trim()) return setError("Preencha nome, CRM e senha.");
+    if (!form.nome.trim() || !form.crm.trim() || !form.senha.trim()) return setError("Preencha nome, registro (CRM ou COREN) e senha.");
     if (form.senha.trim().length < 6) return setError("A senha provisória precisa ter ao menos 6 caracteres.");
     try {
       await api.createUser(form);
@@ -1787,30 +1787,30 @@ function AdminTab() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 760 }}>
       <Card className="anim-card">
-        <SectionTitle icon={<UserPlus size={16} />} title="Cadastrar novo médico" />
+        <SectionTitle icon={<UserPlus size={16} />} title="Cadastrar novo profissional" />
         <form onSubmit={addUser}>
           <div style={grid2}>
             <Field label="Nome completo"><input value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} style={inputStyle} /></Field>
-            <Field label="CRM"><input value={form.crm} onChange={(e) => setForm({ ...form, crm: e.target.value })} style={inputStyle} placeholder="Ex: 12.345" /></Field>
+            <Field label="CRM ou COREN"><input value={form.crm} onChange={(e) => setForm({ ...form, crm: e.target.value })} style={inputStyle} placeholder="Ex: 12.345" /></Field>
             <Field label="E-mail (opcional)"><input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} style={inputStyle} /></Field>
             <Field label="Senha provisória"><input value={form.senha} onChange={(e) => setForm({ ...form, senha: e.target.value })} style={inputStyle} /></Field>
           </div>
           {error && <ErrorLine text={error} />}
           <button type="submit" className="btn-primary" style={{ ...primaryBtn, width: "auto", padding: "10px 22px", marginTop: 16, display: "inline-flex", gap: 8, alignItems: "center" }}>
-            <Plus size={16} /> Adicionar médico
+            <Plus size={16} /> Adicionar profissional
           </button>
         </form>
       </Card>
 
       <Card className="anim-card" style={{ padding: 0 }}>
         <div style={{ padding: "16px 20px 4px" }}>
-          <SectionTitle icon={<Users size={16} />} title={`Médicos cadastrados (${list.length})`} />
+          <SectionTitle icon={<Users size={16} />} title={`Profissionais cadastrados (${list.length})`} />
         </div>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead>
               <tr style={{ background: "#eef4f4", textAlign: "left" }}>
-                {["Nome", "CRM", "Perfil", "Status", "Ações"].map((h) => <th key={h} style={{ padding: "10px 14px", fontWeight: 700, color: C.tealDark }}>{h}</th>)}
+                {["Nome", "Registro", "Perfil", "Status", "Ações"].map((h) => <th key={h} style={{ padding: "10px 14px", fontWeight: 700, color: C.tealDark }}>{h}</th>)}
               </tr>
             </thead>
             <tbody>
@@ -1823,7 +1823,7 @@ function AdminTab() {
                 <tr key={u.crm} className="rowh" style={{ borderTop: `1px solid ${C.line}` }}>
                   <td style={td}>{u.nome}</td>
                   <td style={td}>{u.crm}</td>
-                  <td style={td}>{u.role === "master" ? <Badge tone="amber">Master</Badge> : <Badge>Médico</Badge>}</td>
+                  <td style={td}>{u.role === "master" ? <Badge tone="amber">Master</Badge> : <Badge>Profissional</Badge>}</td>
                   <td style={td}>{u.active ? <Badge tone="green">Ativo</Badge> : <Badge tone="red">Inativo</Badge>}</td>
                   <td style={td}>
                     {u.role !== "master" && (
@@ -1872,7 +1872,7 @@ function ResetPasswordModal({ crm, onClose, onConfirm }) {
   return (
     <div className="modal-overlay" style={{ position: "fixed", inset: 0, background: "rgba(15,42,51,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, zIndex: 50 }} onClick={onClose}>
       <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, maxWidth: 360, width: "100%", padding: 22 }}>
-        <h3 style={{ marginTop: 0, color: C.ink, fontSize: 15 }}>Redefinir senha — CRM {crm}</h3>
+        <h3 style={{ marginTop: 0, color: C.ink, fontSize: 15 }}>Redefinir senha — registro {crm}</h3>
         {done ? (
           <div style={{ display: "flex", alignItems: "center", gap: 8, color: C.green, background: C.greenBg, borderRadius: 9, padding: "10px 12px", fontSize: 13, fontWeight: 600, marginTop: 10 }}>
             <CheckCircle2 size={16} /> Senha redefinida com sucesso.
@@ -2085,7 +2085,7 @@ export default function App() {
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <div style={{ textAlign: "right" }}>
               <div style={{ fontSize: 13, fontWeight: 700 }}>{currentUser.name}</div>
-              <div style={{ fontSize: 11, opacity: 0.75 }}>CRM {currentUser.crm}</div>
+              <div style={{ fontSize: 11, opacity: 0.75 }}>Registro {currentUser.crm}</div>
             </div>
             <div style={{ width: 36, height: 36, borderRadius: 999, background: "rgba(255,255,255,0.16)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, letterSpacing: 0.5 }}>
               {initials}
