@@ -83,10 +83,11 @@ router.post("/login", loginLimiter, async (req, res, next) => {
   try {
     const { crm, senha } = req.body || {};
     const identificador = (crm || "").trim();
-    if (!identificador || !senha) return res.status(400).json({ error: "Informe CRM ou e-mail e senha." });
+    if (!identificador || !senha) return res.status(400).json({ error: "Informe CRM, COREN ou e-mail e senha." });
 
-    // Aceita e-mail (contém "@") ou CRM tolerante a formatação (compara só os
-    // dígitos: "32394" e "32.394" são o mesmo CRM). E-mail é case-insensitive
+    // Aceita e-mail (contém "@") ou registro profissional — CRM ou COREN —
+    // tolerante a formatação (compara só os dígitos: "32394", "32.394" e
+    // "COREN-BA 32.394" são o mesmo registro). E-mail é case-insensitive
     // e ignora cadastros sem e-mail.
     let rows;
     if (pareceEmail(identificador)) {
@@ -100,16 +101,22 @@ router.post("/login", loginLimiter, async (req, res, next) => {
         rows = [];
       } else {
         ({ rows } = await pool.query(
-          "SELECT * FROM medicos WHERE regexp_replace(crm, '\\D', '', 'g') = $1 LIMIT 1",
+          "SELECT * FROM medicos WHERE regexp_replace(crm, '\\D', '', 'g') = $1 LIMIT 2",
           [digitos]
         ));
       }
+    }
+    // Um CRM e um COREN podem ter os mesmos dígitos (registros de conselhos
+    // diferentes). Se o número for ambíguo, não chuta: pede login por e-mail.
+    if (rows.length > 1) {
+      await logAudit(pool, { acao: "login_falhou", detalhes: { identificador, motivo: "registro_ambiguo" }, ip: req.ip });
+      return res.status(409).json({ error: "Mais de um cadastro usa esse número de registro. Entre com o seu e-mail." });
     }
     const medico = rows[0];
 
     if (!medico) {
       await logAudit(pool, { acao: "login_falhou", detalhes: { identificador, motivo: "nao_encontrado" }, ip: req.ip });
-      return res.status(401).json({ error: "CRM ou e-mail não encontrado." });
+      return res.status(401).json({ error: "CRM, COREN ou e-mail não encontrado." });
     }
     if (!medico.active) {
       await logAudit(pool, { medicoId: medico.id, acao: "login_falhou", detalhes: { motivo: "usuario_inativo" }, ip: req.ip });
